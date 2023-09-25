@@ -1,0 +1,701 @@
+
+Set up syslog
+ 
+apt-get install rsyslog
+ 
+nano /etc/rsyslog.conf
+uncomment -- 
+	$ModLoad imudp
+	$UDPServerRun 514
+ 
+	$ModLoad imtcp
+	$InputTCPServerRun 514
+ 
+touch /var/log/asusrouter.log
+root@raspberrypi:~# nano /etc/rsyslog.d/made.conf
+ 
+	$template NetworkLog, "/var/log/asusrouter.log"
+	:fromhost-ip, isequal, "192.168.1.1" -?NetworkLog
+	& ~
+ 
+nano /etc/logrotate.d/logrotate
+	add -- 
+		/var/log/netgear.log {
+        rotate 7
+        size 500k
+        notifempty
+        compress
+        postrotate
+                invoke-rc.d rsyslog rotate > /dev/null
+        endscript
+	}
+ 
+service rsyslog restart
+nano /var/log/asusrouter.log
+ 
+Set up OLED
+ 
+apt-get install -y python-smbus
+apt-get install -y i2c-tools
+	Interfacing options
+	Advanced options
+Enable SPI and i2c
+ 
+apt-get install build-essential python-dev python-pip python-imaging python-smbus git
+pip install RPi.GPIO
+ 
+ 
+cd /root/
+git clone https://github.com/adafruit/Adafruit_Python_SSD1306.git
+cd Adafruit_Python_SSD1306
+python setup.py install
+clone https://github.com/adafruit/Adafruit_Python_SSD1306.git
+cd Adafruit_Python_SSD1306
+python setup.py install
+ 
+nano shapes.py
+	disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST, i2c_bus=1)
+ 
+python shapes.py
+ 
+ctrl-c to cancel
+ 
+apt-get install screen
+ 
+// if you want to run shapes and exit out of ssh, run screen python shapes.sy and hit ctrl a+d, to resume screen type screen -r and to close, ctrl-c.
+ 
+// If you type i2cdetect -y 1 and you get a "no such file or directory" error, do not despair
+ 
+Set up SNMP
+ 
+apt-get install snmp
+apt-get install snmp-mibs-downloader
+download-mibs
+ 
+snmpget -v2c -c public 192.168.1.1 1.3.6.1.2.1.2.2.1.10.1
+	In throughput
+ 
+snmpget -v2c -c public 192.168.1.1 1.3.6.1.2.1.2.2.1.16.1
+	Out throughput
+ 
+The ending .1 might not be correct for you, use snmpwalk to determine what network adapter you should be looking for --
+ 
+snmpwalk -v 1 -c public 192.168.1.1
+ 
+nano /etc/snmp/snmpd.conf
+	# Map 'wordbug' community to the 'ConfigUser'
+	# Map 'public' community to the 'AllUser'
+	#       sec.name        source          community
+	com2sec ConfigUser      default         wordbug
+	com2sec AllUser         default         public
+	# Map 'ConfigUser' to 'ConfigGroup' for SNMP Version 2c
+	# Map 'AllUser' to 'AllGroup' for SNMP Version 2c
+	#                       sec.model       sec.name
+	group   ConfigGroup     v2c             ConfigUser
+	group   AllGroup        v2c             AllUser
+	# Define 'SystemView', which includes everything under .1.3.6.1.2.1.1 (or .1.3.6.1.2.1.25.1)
+	# Define 'AllView', which includes everything under .1
+	#                       incl/excl       subtree
+	view    SystemView      included        .1.3.6.1.2.1.1
+	view    SystemView      included        .1.3.6.1.2.1.25.1.1
+	view    AllView         included        .1
+	# Give 'ConfigGroup' read access to objects in the view 'SystemView'
+	# Give 'AllGroup' read access to objects in the view 'AllView'
+	#                       context model   level   prefix  read            write   notify
+	access  ConfigGroup     ""      any     noauth  exact   SystemView      none    none
+	access  AllGroup        ""      any     noauth  exact   AllView         none    none
+ 
+service snmpd restart
+The Python code to use a Raspberry Pi as a bandwidth monitor is below —
+
+import subprocess
+import time
+import Adafruit_GPIO.SPI as SPI
+import Adafruit_SSD1306
+import Image
+import ImageDraw
+import ImageFont
+
+# Raspberry Pi pin configuration:
+RST = 24
+
+# 128x64 display with hardware I2C:
+disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
+
+# Initialize library.
+disp.begin()
+
+# Clear display.
+disp.clear()
+disp.display()
+
+# Create blank image for drawing.
+# Make sure to create image with mode '1' for 1-bit color.
+width = disp.width
+height = disp.height
+image = Image.new('1', (width, height))
+
+# Get drawing object to draw on image.
+draw = ImageDraw.Draw(image)
+
+# Load default font.
+# font = ImageFont.load_default()
+font = ImageFont.truetype('Ubuntu-M.ttf', 14)
+fontsmall = ImageFont.truetype('Ubuntu-M.ttf', 10)
+fontmedium = ImageFont.truetype('Ubuntu-M.ttf', 12)
+
+#Display Image
+disp.image(image)
+disp.display()
+
+
+#print 'Press Ctl-C to exit'
+
+#functions
+def getSnmpData (oid):
+	
+	try:
+		data = subprocess.check_output("snmpget -v2c -c public 192.168.1.1 " + oid, shell = True)
+	except subprocess.CalledProcessError as e:
+		data = e
+	else:
+		data = "unhandled error"
+	return data;
+
+def getSnmpInt (oid):
+
+	try:
+		data = subprocess.check_output("snmpget -v2c -c public 192.168.1.1 " + oid, shell = True)
+		data = data.split()
+		data = data.pop()
+	except:
+		data = "0"
+	return int(data)
+
+def getSnmpPIData (PIoid):
+
+        try:
+                PIdata = subprocess.check_output("snmpget -v2c -c public 127.0.0.1 " + PIoid, shell = True)
+        except subprocess.CalledProcessError as f:
+                PIdata = f
+        else:
+                PIdata = "unhandled error"
+        return PIdata;
+
+def getSnmpPIInt (PIoid):
+
+        try:
+                PIdata = subprocess.check_output("snmpget -v2c -c public 127.0.0.1 " + PIoid, shell = True)
+                PIdata = PIdata.split()
+                PIdata = PIdata.pop()
+        except:
+                PIdata = "0"
+        return int(PIdata)
+
+def drawBar (x, barHeight):
+	# parameters are x, y, end x, end y 
+	# draw.rectangle ((x, height - barHeight, x + 10, height -1), outline=255, fill=255)
+	draw.rectangle ((x, 32 - barHeight, x + 10, height - 32), outline=255, fill=255)
+
+def drawBarLOW (x, barLOWHeight):
+        # parameters are x, y, end x, end y
+        draw.rectangle ((x, 32 + barLOWHeight, x + 10, height - 32), outline=255, fill=255)
+
+def textRate (rate):
+	rate = rate * 8 / 1000
+	if rate < 1000:
+		result = str(round(rate,1)) + 'k'
+	else:
+		result = str(round(rate/1000,1)) + 'm'
+	return result
+
+#defines
+# oidInWan = '1.3.6.1.2.1.2.2.1.10.11' #32bit
+oidInWan = '1.3.6.1.2.1.31.1.1.1.6.11'
+# oidOutWan = '1.3.6.1.2.1.2.2.1.16.11' #32bit
+oidOutWan = '1.3.6.1.2.1.31.1.1.1.10.11'
+# oidInPI = '1.3.6.1.2.1.2.2.1.16.3' #32bit
+oidInPI = '1.3.6.1.2.1.31.1.1.1.10.3'
+# oidOutPI = '1.3.6.1.2.1.2.2.1.10.3' #32bit
+oidOutPI = '1.3.6.1.2.1.2.2.1.10.3'
+
+
+lastInBytes = getSnmpInt (oidInWan);
+lastOutBytes = getSnmpInt (oidOutWan);
+lastPIInBytes = getSnmpPIInt (oidInPI);
+lastPIOutBytes = getSnmpPIInt (oidOutPI);
+lastTime = time.time()
+
+maxRateIn = 86000000
+maxRateOut = 24000000
+PImaxRateIn = 50000000
+PImaxRateOut = 24000000
+
+#timed array vars
+timerTime = time.time()
+highestSpeedIn = 0
+highestSpeedOut = 0
+PIhighestSpeedIn = 0
+PIhighestSpeedOut = 0
+speedArrayIn = []
+speedArrayOut = []
+PIspeedArrayIn = []
+PIspeedArrayOut = []
+inMax = 0
+outMax = 0
+PIinMax = 0
+PIoutMax = 0
+
+while (1):
+	time.sleep(2)
+	draw.rectangle((0, 0, width, height), outline=0, fill=0)
+	
+	now = time.time()
+	elapsed = now - lastTime
+	lastTime = now
+	
+	#calculate rates in and out
+	inBytes = getSnmpInt (oidInWan)
+	currInBytes = (inBytes - lastInBytes) / elapsed
+	lastInBytes = inBytes
+
+	outBytes = getSnmpInt (oidOutWan)
+	currOutBytes = (outBytes - lastOutBytes) / elapsed
+	lastOutBytes = outBytes
+	
+	PIinBytes = getSnmpPIInt (oidInPI)
+	currPIInBytes = (PIinBytes - lastPIInBytes) / elapsed
+	lastPIInBytes = PIinBytes
+	
+	PIoutBytes = getSnmpPIInt (oidOutPI)
+        currPIOutBytes = (PIoutBytes - lastPIOutBytes) / elapsed
+        lastPIOutBytes = PIoutBytes
+
+
+	# currPIinBytes = 'dog '
+	#max rate last 24 hours calculations
+
+	if currInBytes > highestSpeedIn:
+		highestSpeedIn = currInBytes
+	if currOutBytes > highestSpeedOut:
+		highestSpeedOut = currOutBytes
+	if currPIInBytes > PIhighestSpeedIn:
+		PIhighestSpeedIn = currPIInBytes
+	if currPIOutBytes > PIhighestSpeedOut:
+		PIhighestSpeedOut = currPIOutBytes
+
+	if now > timerTime + 3600:
+		print '-----------------------------------------------------------------  time expired'
+		timerTime = now
+
+		speedArrayIn.append (highestSpeedIn)
+		if len (speedArrayIn) > 23:
+			del speedArrayIn[0]
+		inMax = max(speedArrayIn)
+
+		speedArrayOut.append (highestSpeedOut)
+                if len (speedArrayOut) > 23:
+                        del speedArrayOut[0]
+		outMax = max(speedArrayOut)
+
+		highestSpeedIn = 0
+		highestSpeedOut = 0
+
+		PIspeedArrayIn.append (PIhighestSpeedIn)
+                if len (PIspeedArrayIn) > 23:
+                        del PIspeedArrayIn[0]
+                PIinMax = max(PIspeedArrayIn)
+
+                PIspeedArrayOut.append (PIhighestSpeedOut)
+                if len (PIspeedArrayOut) > 23:
+                        del PIspeedArrayOut[0]
+                PIoutMax = max(PIspeedArrayOut)
+
+                PIhighestSpeedIn = 0
+                PIhighestSpeedOut = 0
+
+		#test output
+		# for inSpd in speedArrayIn:
+		 # print '--- ' + str(inSpd)
+		# print 'inMax ' + str(inMax)
+
+	#adjust these in each loop in case we find a faster speed
+	inMax = max(inMax, highestSpeedIn)
+	outMax = max(outMax, highestSpeedOut)
+	PIinMax = max(PIinMax, PIhighestSpeedIn)
+        PIoutMax = max(PIoutMax, PIhighestSpeedOut)
+
+	#print str(now) + '    ' + str(timerTime)
+	# print 'In: ' + textRate(currInBytes) + '\tOut: ' + textRate(currOutBytes) + '\tElapsed ' + str(round(elapsed,2)) + '\t\tInMax ' + textRate(inMax) + '\tOutMax ' + textRate(outMax)
+	# print 'PIIn: ' + textRate(currPIInBytes) + '\tPIOut: ' + textRate(currPIOutBytes) + '\tElapsed ' + str(round(elapsed,2)) + '\t\tPIInMax ' + textRate(PIinMax) + '\tPIOutMax ' + textRate(PIoutMax)
+	# print 'Hi In ' + str(highestSpeedIn) + '   Hi Out ' + str(highestSpeedOut)
+	# print 'PIHi In ' + str(PIhighestSpeedIn) + '   PIHi Out ' + str(PIhighestSpeedOut)
+
+	#draw graph
+	inHeight = 0.0
+	outHeight = 0.0
+	PIinHeight = 0.0
+	PIoutHeight = 0.0
+
+	if currInBytes > 0:	
+		inHeight = float(currInBytes * height / inMax)  #was maxRateIn
+	
+	if currOutBytes > 0:
+		outHeight = float(currOutBytes * height / outMax)  
+
+	if currPIInBytes > 0:
+		PIinHeight = float(currPIInBytes * height / PIinMax)
+	
+	if currPIOutBytes > 0:
+                PIoutHeight = float(currPIOutBytes * height / PIoutMax)
+
+	drawBar (0, inHeight)
+	drawBar (14, PIinHeight)
+	drawBarLOW (0, outHeight)
+	drawBarLOW (14, PIoutHeight)
+
+	#write rates
+	draw.text((31,24), textRate(currInBytes), font=font, fill=255)
+        draw.text((76,24), textRate(currOutBytes), font=font, fill=255)
+	
+	draw.text((31,36), textRate(currPIInBytes), font=font, fill=255)
+	draw.text((76,36), textRate(currPIOutBytes), font=font, fill=255)
+
+
+	
+	#max rates
+	draw.text((31,0), textRate(inMax), font=fontsmall, fill=255)
+	draw.text((76,0), textRate(outMax), font=fontsmall, fill=255)
+
+	draw.text((31,11), textRate(PIinMax), font=fontsmall, fill=255)
+        draw.text((76,11), textRate(PIoutMax), font=fontsmall, fill=255)
+
+
+	from urllib2 import urlopen
+	my_ip = urlopen('http://ip.42.pl/raw').read()
+
+
+	cmd = "top -bn1 | grep load | awk '{printf \"CPU: %.2f\", $(NF-2)}'"
+	MemUsage = subprocess.check_output(cmd, shell = True )
+	
+
+	my_ipp = str(MemUsage)
+
+	myword = my_ip
+		
+	draw.text((31,54), myword, font=fontsmall, fill=255)
+
+	# import json
+	# import urllib2
+
+	# url="http://api.coindesk.com/v1/bpi/currentprice/GBP.json"
+	
+	# jsonURL=urllib2.urlopen(url)
+
+	# jsonObject=json.load(jsonURL)
+
+	# print jsonObject['bpi']['GBP']['code']
+	# print jsonObject['bpi']['GBP']['rate']
+
+	# draw.text((31,54), jsonObject['bpi']['GBP']['rate'], font=fontsmall, fill=255)
+
+	disp.image(image)
+	disp.display()
+
+
+import subprocess
+import time
+import Adafruit_GPIO.SPI as SPI
+import Adafruit_SSD1306
+import Image
+import ImageDraw
+import ImageFont
+ 
+# Raspberry Pi pin configuration:
+RST = 24
+ 
+# 128x64 display with hardware I2C:
+disp = Adafruit_SSD1306.SSD1306_128_64(rst=RST)
+ 
+# Initialize library.
+disp.begin()
+ 
+# Clear display.
+disp.clear()
+disp.display()
+ 
+# Create blank image for drawing.
+# Make sure to create image with mode '1' for 1-bit color.
+width = disp.width
+height = disp.height
+image = Image.new('1', (width, height))
+ 
+# Get drawing object to draw on image.
+draw = ImageDraw.Draw(image)
+ 
+# Load default font.
+# font = ImageFont.load_default()
+font = ImageFont.truetype('Ubuntu-M.ttf', 14)
+fontsmall = ImageFont.truetype('Ubuntu-M.ttf', 10)
+fontmedium = ImageFont.truetype('Ubuntu-M.ttf', 12)
+ 
+#Display Image
+disp.image(image)
+disp.display()
+ 
+ 
+#print 'Press Ctl-C to exit'
+ 
+#functions
+def getSnmpData (oid):
+	
+	try:
+		data = subprocess.check_output("snmpget -v2c -c public 192.168.1.1 " + oid, shell = True)
+	except subprocess.CalledProcessError as e:
+		data = e
+	else:
+		data = "unhandled error"
+	return data;
+ 
+def getSnmpInt (oid):
+ 
+	try:
+		data = subprocess.check_output("snmpget -v2c -c public 192.168.1.1 " + oid, shell = True)
+		data = data.split()
+		data = data.pop()
+	except:
+		data = "0"
+	return int(data)
+ 
+def getSnmpPIData (PIoid):
+ 
+        try:
+                PIdata = subprocess.check_output("snmpget -v2c -c public 127.0.0.1 " + PIoid, shell = True)
+        except subprocess.CalledProcessError as f:
+                PIdata = f
+        else:
+                PIdata = "unhandled error"
+        return PIdata;
+ 
+def getSnmpPIInt (PIoid):
+ 
+        try:
+                PIdata = subprocess.check_output("snmpget -v2c -c public 127.0.0.1 " + PIoid, shell = True)
+                PIdata = PIdata.split()
+                PIdata = PIdata.pop()
+        except:
+                PIdata = "0"
+        return int(PIdata)
+ 
+def drawBar (x, barHeight):
+	# parameters are x, y, end x, end y 
+	# draw.rectangle ((x, height - barHeight, x + 10, height -1), outline=255, fill=255)
+	draw.rectangle ((x, 32 - barHeight, x + 10, height - 32), outline=255, fill=255)
+ 
+def drawBarLOW (x, barLOWHeight):
+        # parameters are x, y, end x, end y
+        draw.rectangle ((x, 32 + barLOWHeight, x + 10, height - 32), outline=255, fill=255)
+ 
+def textRate (rate):
+	rate = rate * 8 / 1000
+	if rate < 1000:
+		result = str(round(rate,1)) + 'k'
+	else:
+		result = str(round(rate/1000,1)) + 'm'
+	return result
+ 
+#defines
+# oidInWan = '1.3.6.1.2.1.2.2.1.10.11' #32bit
+oidInWan = '1.3.6.1.2.1.31.1.1.1.6.11'
+# oidOutWan = '1.3.6.1.2.1.2.2.1.16.11' #32bit
+oidOutWan = '1.3.6.1.2.1.31.1.1.1.10.11'
+# oidInPI = '1.3.6.1.2.1.2.2.1.16.3' #32bit
+oidInPI = '1.3.6.1.2.1.31.1.1.1.10.3'
+# oidOutPI = '1.3.6.1.2.1.2.2.1.10.3' #32bit
+oidOutPI = '1.3.6.1.2.1.2.2.1.10.3'
+ 
+ 
+lastInBytes = getSnmpInt (oidInWan);
+lastOutBytes = getSnmpInt (oidOutWan);
+lastPIInBytes = getSnmpPIInt (oidInPI);
+lastPIOutBytes = getSnmpPIInt (oidOutPI);
+lastTime = time.time()
+ 
+maxRateIn = 86000000
+maxRateOut = 24000000
+PImaxRateIn = 50000000
+PImaxRateOut = 24000000
+ 
+#timed array vars
+timerTime = time.time()
+highestSpeedIn = 0
+highestSpeedOut = 0
+PIhighestSpeedIn = 0
+PIhighestSpeedOut = 0
+speedArrayIn = []
+speedArrayOut = []
+PIspeedArrayIn = []
+PIspeedArrayOut = []
+inMax = 0
+outMax = 0
+PIinMax = 0
+PIoutMax = 0
+ 
+while (1):
+	time.sleep(2)
+	draw.rectangle((0, 0, width, height), outline=0, fill=0)
+	
+	now = time.time()
+	elapsed = now - lastTime
+	lastTime = now
+	
+	#calculate rates in and out
+	inBytes = getSnmpInt (oidInWan)
+	currInBytes = (inBytes - lastInBytes) / elapsed
+	lastInBytes = inBytes
+ 
+	outBytes = getSnmpInt (oidOutWan)
+	currOutBytes = (outBytes - lastOutBytes) / elapsed
+	lastOutBytes = outBytes
+	
+	PIinBytes = getSnmpPIInt (oidInPI)
+	currPIInBytes = (PIinBytes - lastPIInBytes) / elapsed
+	lastPIInBytes = PIinBytes
+	
+	PIoutBytes = getSnmpPIInt (oidOutPI)
+        currPIOutBytes = (PIoutBytes - lastPIOutBytes) / elapsed
+        lastPIOutBytes = PIoutBytes
+ 
+ 
+	# currPIinBytes = 'dog '
+	#max rate last 24 hours calculations
+ 
+	if currInBytes > highestSpeedIn:
+		highestSpeedIn = currInBytes
+	if currOutBytes > highestSpeedOut:
+		highestSpeedOut = currOutBytes
+	if currPIInBytes > PIhighestSpeedIn:
+		PIhighestSpeedIn = currPIInBytes
+	if currPIOutBytes > PIhighestSpeedOut:
+		PIhighestSpeedOut = currPIOutBytes
+ 
+	if now > timerTime + 3600:
+		print '-----------------------------------------------------------------  time expired'
+		timerTime = now
+ 
+		speedArrayIn.append (highestSpeedIn)
+		if len (speedArrayIn) > 23:
+			del speedArrayIn[0]
+		inMax = max(speedArrayIn)
+ 
+		speedArrayOut.append (highestSpeedOut)
+                if len (speedArrayOut) > 23:
+                        del speedArrayOut[0]
+		outMax = max(speedArrayOut)
+ 
+		highestSpeedIn = 0
+		highestSpeedOut = 0
+ 
+		PIspeedArrayIn.append (PIhighestSpeedIn)
+                if len (PIspeedArrayIn) > 23:
+                        del PIspeedArrayIn[0]
+                PIinMax = max(PIspeedArrayIn)
+ 
+                PIspeedArrayOut.append (PIhighestSpeedOut)
+                if len (PIspeedArrayOut) > 23:
+                        del PIspeedArrayOut[0]
+                PIoutMax = max(PIspeedArrayOut)
+ 
+                PIhighestSpeedIn = 0
+                PIhighestSpeedOut = 0
+ 
+		#test output
+		# for inSpd in speedArrayIn:
+		 # print '--- ' + str(inSpd)
+		# print 'inMax ' + str(inMax)
+ 
+	#adjust these in each loop in case we find a faster speed
+	inMax = max(inMax, highestSpeedIn)
+	outMax = max(outMax, highestSpeedOut)
+	PIinMax = max(PIinMax, PIhighestSpeedIn)
+        PIoutMax = max(PIoutMax, PIhighestSpeedOut)
+ 
+	#print str(now) + '    ' + str(timerTime)
+	# print 'In: ' + textRate(currInBytes) + '\tOut: ' + textRate(currOutBytes) + '\tElapsed ' + str(round(elapsed,2)) + '\t\tInMax ' + textRate(inMax) + '\tOutMax ' + textRate(outMax)
+	# print 'PIIn: ' + textRate(currPIInBytes) + '\tPIOut: ' + textRate(currPIOutBytes) + '\tElapsed ' + str(round(elapsed,2)) + '\t\tPIInMax ' + textRate(PIinMax) + '\tPIOutMax ' + textRate(PIoutMax)
+	# print 'Hi In ' + str(highestSpeedIn) + '   Hi Out ' + str(highestSpeedOut)
+	# print 'PIHi In ' + str(PIhighestSpeedIn) + '   PIHi Out ' + str(PIhighestSpeedOut)
+ 
+	#draw graph
+	inHeight = 0.0
+	outHeight = 0.0
+	PIinHeight = 0.0
+	PIoutHeight = 0.0
+ 
+	if currInBytes > 0:	
+		inHeight = float(currInBytes * height / inMax)  #was maxRateIn
+	
+	if currOutBytes > 0:
+		outHeight = float(currOutBytes * height / outMax)  
+ 
+	if currPIInBytes > 0:
+		PIinHeight = float(currPIInBytes * height / PIinMax)
+	
+	if currPIOutBytes > 0:
+                PIoutHeight = float(currPIOutBytes * height / PIoutMax)
+ 
+	drawBar (0, inHeight)
+	drawBar (14, PIinHeight)
+	drawBarLOW (0, outHeight)
+	drawBarLOW (14, PIoutHeight)
+ 
+	#write rates
+	draw.text((31,24), textRate(currInBytes), font=font, fill=255)
+        draw.text((76,24), textRate(currOutBytes), font=font, fill=255)
+	
+	draw.text((31,36), textRate(currPIInBytes), font=font, fill=255)
+	draw.text((76,36), textRate(currPIOutBytes), font=font, fill=255)
+ 
+ 
+	
+	#max rates
+	draw.text((31,0), textRate(inMax), font=fontsmall, fill=255)
+	draw.text((76,0), textRate(outMax), font=fontsmall, fill=255)
+ 
+	draw.text((31,11), textRate(PIinMax), font=fontsmall, fill=255)
+        draw.text((76,11), textRate(PIoutMax), font=fontsmall, fill=255)
+ 
+ 
+	from urllib2 import urlopen
+	my_ip = urlopen('http://ip.42.pl/raw').read()
+ 
+ 
+	cmd = "top -bn1 | grep load | awk '{printf \"CPU: %.2f\", $(NF-2)}'"
+	MemUsage = subprocess.check_output(cmd, shell = True )
+	
+ 
+	my_ipp = str(MemUsage)
+ 
+	myword = my_ip
+		
+	draw.text((31,54), myword, font=fontsmall, fill=255)
+ 
+	# import json
+	# import urllib2
+ 
+	# url="http://api.coindesk.com/v1/bpi/currentprice/GBP.json"
+	
+	# jsonURL=urllib2.urlopen(url)
+ 
+	# jsonObject=json.load(jsonURL)
+ 
+	# print jsonObject['bpi']['GBP']['code']
+	# print jsonObject['bpi']['GBP']['rate']
+ 
+	# draw.text((31,54), jsonObject['bpi']['GBP']['rate'], font=fontsmall, fill=255)
+ 
+	disp.image(image)
+	disp.display()
+
+ 
+Make sure you download the adequate fonts and put them in the same directory as your python file. From there, run python nameofyourfile.py and ctrl + c to close. For the OLED, I bought mine from Ebay. Make sure you get the wiring correct, sometimes the pins are in a different place.
