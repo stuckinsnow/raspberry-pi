@@ -1,0 +1,150 @@
+This is an old script and looks a bit insecure, but you can delete root password later.
+
+sudo nano /etc/ssh/sshd_config
+	Find (ctrl + w) -- 
+		"PermitRootLogin"
+	Change to -- 
+		PermitRootLogin Yes"
+sudo passwd root
+	Use password "bob"
+su root
+ssh-keygen
+	Hit return a bunch of times
+Get filezilla and connect to the raspberry pi 3 b ip with username "root" and password "bob" with "SFTP" as the type. 
+Download .ssh folder and move it to your cygwin directory, then disconnect from server.
+	X:\cygwin64\home\Username\.ssh
+Change server settings using SFTP and instead of "Logon Type" "Normal" select "Key File"
+	X:\cygwin64\home\Username\.ssh\id_rsa
+ 
+Check you can connect and then close FileZilla
+passwd -d root (removes password)
+ 
+apt-get update
+apt-get upgrade
+ 
+nano /etc/rc.local
+Above exit 0 --
+/usr/bin/tvservice -o
+reboot
+ 
+This should disable the HDMI port from working and save some power.
+ 
+ 
+/opt/vc/bin/vcgencmd measure_temp
+
+
+//
+
+
+
+
+
+apt-get install hostapd
+apt-get install dnsmasq
+ 
+nano /etc/dhcpcd.conf
+	add to bottom -- denyinterfaces wlan0
+ 
+ 
+nano /etc/network/interfaces
+ 
+add --
+	iface eth0 inet manual
+	allow-hotplug wlan0
+	auto br0
+	iface br0 inet dhcp
+	bridge_ports eth0 wlan0
+	pre-up ifconfig eth0 0.0.0.0 up
+	pre-up ifconfig wlan0 0.0.0.0 up
+	pre-up brctl addbr br0
+	pre-up brctl addif br0 eth0
+	post-down ifconfig wlan0 0.0.0.0 down
+	post-down ifconfig eth0 0.0.0.0 down
+	post-down brctl delif br0 eth0
+	post-down brctl delbr br0
+ 
+apt-get install bridge-utils
+ 
+service dhcpcd restart
+ifdown wlan0
+ifup wlan0
+ 
+nano /etc/hostapd/hostapd.conf
+ 
+add --
+	interface=wlan0
+	driver=nl80211
+ 
+	hw_mode=g
+	channel=6
+	ieee80211n=1
+	wmm_enabled=1
+	ht_capab=[HT40][SHORT-GI-20][DSSS_CCK-40]
+	macaddr_acl=0
+	ignore_broadcast_ssid=0
+ 
+	# Use WPA2
+	auth_algs=1
+	wpa=2
+	wpa_key_mgmt=WPA-PSK
+	rsn_pairwise=CCMP
+ 
+	# This is the name of the network
+	ssid=RPIE-AP
+	# The network passphrase
+	wpa_passphrase=buggy
+ 
+	bridge=br0
+ 
+nano /etc/default/hostapd
+Replace --
+	#DAEMON_CONF="" 
+	DAEMON_CONF="/etc/hostapd/hostapd.conf"
+ 
+nano /etc/init.d/hostapd
+Replace --
+	DAEMON_CONF= 
+	DAEMON_CONF=/etc/hostapd/hostapd.conf
+ 
+mv /etc/dnsmasq.conf /etc/dnsmasq.conf.orig
+ 
+nano /etc/dnsmasq.conf
+Add --
+	interface=wlan0       # Use interface wlan0
+	# listen-address=192.168.220.1   # Specify the address to listen on
+	bind-interfaces      # Bind to the interface
+	# server=8.8.8.8       # Use Google DNS
+	# domain-needed        # Don't forward short names
+	# bogus-priv           # Drop the non-routed address spaces.
+	# dhcp-range=192.168.200.50,192.168.200.150,12h # IP range and lease time
+ 
+ 
+nano /etc/sysctl.conf
+Replace --
+	#net.ipv4.ip_forward=1
+	net.ipv4.ip_forward=1
+ 
+sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
+ 
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE  
+iptables -A FORWARD -i eth0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT  
+iptables -A FORWARD -i wlan0 -o eth0 -j ACCEPT  
+ 
+sh -c "iptables-save > /etc/iptables.ipv4.nat"
+ 
+nano /etc/rc.local
+ 
+Above "Exit 0"
+Add --
+	iptables-restore < /etc/iptables.ipv4.nat
+ 
+service hostapd start
+service dnsmasq start
+ 
+reboot
+ 
+change wifi password -- nano /etc/hostapd/hostapd.conf
+passwd -d pi (removes pi password now that you can log in as root)
+ 
+update-rc.d dhcpcd disable
+update-rc.d -f dhcpcd remove
